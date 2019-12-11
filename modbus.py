@@ -4,6 +4,7 @@ from pymodbus.datastore import ModbusSequentialDataBlock
 from pymodbus.datastore import ModbusSlaveContext, ModbusServerContext
 from pymodbus.transaction import ModbusRtuFramer
 from pymodbus.server.sync import StartSerialServer
+from datetime import datetime
 
 from _thread import start_new_thread
 import time
@@ -18,7 +19,7 @@ sensors = {}
 index = {'NO':0,'T0':1,'H0':2,'D0':3,'D1':4,'C0':5,'M0':6,'Q0':7}
 refresh = True
 
-with open("mcu3k.conf") as f:
+with open("/home/emart/Sensors/mcu3k.conf") as f:
     lines = f.readlines()
     for k in lines:
         if k[0] == '#': continue
@@ -28,6 +29,7 @@ with open("mcu3k.conf") as f:
         else:
             print("wrong sensor.txt: %s"%(s))
 print("Number of sensors for tracking = %d"%(len(sensors)))
+print("Sensors: ", sensors)
 
 
 def updating_writer(a):
@@ -36,24 +38,27 @@ def updating_writer(a):
         log.debug("\nupdating the context")
         if refresh:
             try:
-                r = requests.get('http://t.damoa.io:9500/latest')
+                r = requests.get('http://localhost:9500/latest')
             except Exception as e:
                 print("error in request", e)
+            print("Got req=", r)
             try:
                 latest = r.json()
             except Exception as e:
                 print("error in request", e)
             refresh = False
+            print("latest=", latest)
         context = a[0]
         register = 3
         address = 0x00
         values = context.getValues(register, address, count=10*len(sensors))
         print("old values=", values)
+        #print("latest=", latest)
         for sens in sensors:
             if sens in latest:
                 try:
                     values[sensors[sens]+index['NO']-1] = int(sens[2:])
-                    values[sensors[sens]+index['T0']-1] = int(float(latest[sens].get('T0',0)) * 10)
+                    values[sensors[sens]+index['T0']-1] = int((float(latest[sens].get('T0',0)) * 10)&0xFFFF)
                     values[sensors[sens]+index['H0']-1] = int(float(latest[sens].get('H0',0)) * 10)
                     values[sensors[sens]+index['D0']-1] = int(latest[sens].get('D0',0)) * 10
                     values[sensors[sens]+index['D1']-1] = int(latest[sens].get('D1',0)) * 10
@@ -62,19 +67,33 @@ def updating_writer(a):
                     values[sensors[sens]+index['Q0']-1] = int(latest[sens].get('Q0',0)) * 10
                 except Exception as e:
                     print("error in conversion", e)
-                log.debug("got new values: " + str(values[sensors[sens]+index['NO']-1:sensors[sens]+index['Q0']]))
-        print("new values=", values)
+                print("got new values: " + str(values[sensors[sens]+index['NO']-1:sensors[sens]+index['Q0']]))
+            else:
+                values[sensors[sens]+index['NO']-1] = int(sens[2:])
+                values[sensors[sens]+index['T0']-1] = 0
+                values[sensors[sens]+index['H0']-1] = 0
+                values[sensors[sens]+index['D0']-1] = 0
+                values[sensors[sens]+index['D1']-1] = 0
+                values[sensors[sens]+index['C0']-1] = 0
+                values[sensors[sens]+index['M0']-1] = 0
+                values[sensors[sens]+index['Q0']-1] = 0
+                print("fill zeros: " + str(values[sensors[sens]+index['NO']-1:sensors[sens]+index['Q0']]))
+
         context.setValues(register, address, values)
-        time.sleep(60)
+        print("new values=", values, "len=", len(values))
+        print("======================================= sleeping...")
+        time.sleep(15)
+        print("======================================= wake up")
+        print(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         refresh = True
 
 
 def run_updating_server():
     store = ModbusSlaveContext(
-        di=ModbusSequentialDataBlock(0, [17]*100),
-        co=ModbusSequentialDataBlock(0, [17]*100),
-        hr=ModbusSequentialDataBlock(0, [0, 250,650,66,99,4210,76,0,0,0]*10),
-        ir=ModbusSequentialDataBlock(0, [17]*100))
+        di=ModbusSequentialDataBlock(0, [0]*0xff),
+        co=ModbusSequentialDataBlock(0, [0]*0xff),
+        hr=ModbusSequentialDataBlock(0, [0]*0xff),
+        ir=ModbusSequentialDataBlock(0, [0]*0xff))
     context = ModbusServerContext(slaves=store, single=True)
     
     identity = ModbusDeviceIdentification()
